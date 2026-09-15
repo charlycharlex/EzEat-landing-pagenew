@@ -439,62 +439,141 @@ function makePerson(bodyColor, headColor, scale=1){
   return p;
 }
 
-/* comida de mesa, hecha con la misma geometría simple que el resto de la escena
-   (los packs realistas que nos pasaron pesan ~2M vértices cada uno — inviables para tiempo real) */
-function makeBurger(x,y,z,scale){
-  const g2 = new THREE.Group();
-  const tan = new THREE.MeshStandardMaterial({color:0xE8B873, roughness:0.75});
-  const brown = new THREE.MeshStandardMaterial({color:0x8B5A2B, roughness:0.6});
-  const yellow = new THREE.MeshStandardMaterial({color:0xF4C430, roughness:0.5});
-  const green = new THREE.MeshStandardMaterial({color:0x6FAE4A, roughness:0.8});
-  const parts = [
-    [new THREE.CylinderGeometry(0.12,0.12,0.05,14), tan, 0.025],
-    [new THREE.CylinderGeometry(0.115,0.115,0.035,14), brown, 0.0175],
-    [new THREE.CylinderGeometry(0.13,0.13,0.01,14), yellow, 0.005],
-    [new THREE.CylinderGeometry(0.135,0.135,0.02,14), green, 0.01],
-    [new THREE.CylinderGeometry(0.1,0.125,0.08,14), tan, 0.04],
-  ];
-  let h = 0;
-  parts.forEach(([geo,mat,half])=>{
-    const m = new THREE.Mesh(geo, mat);
-    m.position.y = h + half; m.castShadow = true; m.receiveShadow = true;
-    g2.add(m);
-    h += half*2;
-  });
-  g2.position.set(x,y,z);
-  g2.scale.setScalar(scale||1);
-  return g2;
+/* modelos procedurales del restaurante: juego de mesa (mesa + sillas + menú QR) y Remy.
+   Vienen modelados a su propia escala (una mesa mide ~1.3 de alto); buildDining y
+   buildKitchen los escalan para que cuadren con los personajes. */
+const DESIGN = {
+  cream:new THREE.MeshStandardMaterial({color:0xe9dfcd,roughness:0.78}),
+  ivory:new THREE.MeshStandardMaterial({color:0xfffcf3,roughness:0.46}),
+  oak:new THREE.MeshStandardMaterial({color:0xd4ad78,roughness:0.76}),
+  metal:new THREE.MeshStandardMaterial({color:0xb5bab9,metalness:0.65,roughness:0.32}),
+  fur:new THREE.MeshStandardMaterial({color:0x567b87,roughness:0.9}),
+  belly:new THREE.MeshStandardMaterial({color:0x78939a,roughness:0.9}),
+  pink:new THREE.MeshStandardMaterial({color:0xe6a38e,roughness:0.8}),
+  ear:new THREE.MeshStandardMaterial({color:0xc88779,roughness:0.9}),
+  dark:new THREE.MeshStandardMaterial({color:0x26323a,roughness:0.65}),
+  pupil:new THREE.MeshStandardMaterial({color:0x171e22,roughness:0.2}),
+  iris:new THREE.MeshStandardMaterial({color:0x835a35,roughness:0.5}),
+  leaf:new THREE.MeshStandardMaterial({color:0x637755,roughness:0.8}),
+  purple:new THREE.MeshStandardMaterial({color:0xa58cbb,roughness:0.4})
+};
+const sphereUnit = new THREE.SphereGeometry(1,24,16);
+function ellipsoid(parent,mat,x,y,z,sx,sy,sz){
+  const m=new THREE.Mesh(sphereUnit,mat); m.position.set(x,y,z); m.scale.set(sx,sy,sz);
+  m.castShadow=true; m.receiveShadow=true; parent.add(m); return m;
 }
-function makeFries(x,y,z,scale){
-  const g2 = new THREE.Group();
-  const red = new THREE.MeshStandardMaterial({color:0xE23D3D, roughness:0.6});
-  const fryMat = new THREE.MeshStandardMaterial({color:0xF2C94C, roughness:0.6});
-  const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.055,0.045,0.11,10), red);
-  cup.position.y = 0.055; cup.castShadow = true; g2.add(cup);
-  for(let i=0;i<7;i++){
-    const stick = new THREE.Mesh(new THREE.BoxGeometry(0.012,0.13,0.012), fryMat);
-    const ang = (i/7)*Math.PI*2;
-    stick.position.set(Math.cos(ang)*0.02, 0.16, Math.sin(ang)*0.02);
-    stick.rotation.z = Math.sin(i*3.1)*0.4;
-    stick.rotation.x = Math.cos(i*2.3)*0.4;
-    stick.castShadow = true;
-    g2.add(stick);
+function softBox(w,h,d,mat,x=0,y=0,z=0,r=.1){
+  r=Math.min(r,w*.45,d*.45);
+  const s=new THREE.Shape(),a=-w/2,b=-d/2;
+  s.moveTo(a+r,b);s.lineTo(a+w-r,b);s.quadraticCurveTo(a+w,b,a+w,b+r);
+  s.lineTo(a+w,b+d-r);s.quadraticCurveTo(a+w,b+d,a+w-r,b+d);
+  s.lineTo(a+r,b+d);s.quadraticCurveTo(a,b+d,a,b+d-r);
+  s.lineTo(a,b+r);s.quadraticCurveTo(a,b,a+r,b);
+  const bevel=Math.min(h*.22,.035);
+  const geo=new THREE.ExtrudeGeometry(s,{depth:h-2*bevel,steps:1,bevelEnabled:true,bevelSegments:2,bevelSize:bevel,bevelThickness:bevel,curveSegments:5});
+  geo.rotateX(-Math.PI/2);geo.translate(0,-h/2+bevel,0);
+  const m=new THREE.Mesh(geo,mat);m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;return m;
+}
+function stroke(parent,points,r,mat){
+  const curve=new THREE.CatmullRomCurve3(points.map(p=>new THREE.Vector3(...p)));
+  const m=new THREE.Mesh(new THREE.TubeGeometry(curve,20,r,6,false),mat);
+  m.castShadow=true;parent.add(m);return m;
+}
+function makeChair(){
+  const g=new THREE.Group();g.name='Silla crema · pedestal';
+  g.add(cyl(.42,.49,.09,DESIGN.metal,0,.08,0));
+  g.add(cyl(.07,.1,.66,DESIGN.metal,0,.42,0));
+  g.add(softBox(1.04,.18,.94,DESIGN.cream,0,.78,0,.28));
+  // respaldo: una sola concha curva, abierta hacia +Z local
+  const outline=new THREE.Shape(); const n=24;
+  for(let i=0;i<=n;i++){const a=-1.28+i*2.56/n;const x=.55*Math.sin(a),z=-.47*Math.cos(a);i?outline.lineTo(x,z):outline.moveTo(x,z);}
+  for(let i=n;i>=0;i--){const a=-1.28+i*2.56/n;outline.lineTo(.43*Math.sin(a),-.35*Math.cos(a));}
+  outline.closePath();
+  const geo=new THREE.ExtrudeGeometry(outline,{depth:.76,bevelEnabled:true,bevelSize:.045,bevelThickness:.045,bevelSegments:3,curveSegments:4});
+  geo.rotateX(Math.PI/2);geo.translate(0,1.55,0);
+  const shell=new THREE.Mesh(geo,DESIGN.cream);shell.castShadow=true;shell.receiveShadow=true;g.add(shell);
+  return g;
+}
+function makeMenuTexture(){
+  const c=document.createElement('canvas');c.width=256;c.height=320;
+  const ctx=c.getContext('2d');ctx.fillStyle='#fffcf3';ctx.fillRect(0,0,256,320);
+  ctx.fillStyle='#0b1f3a';ctx.textAlign='center';ctx.font='bold 28px sans-serif';ctx.fillText('EzEat',128,43);
+  // patrón decorativo tipo QR, no apunta a ninguna URL real
+  const step=8,ox=44,oy=69;
+  for(let y=0;y<21;y++)for(let x=0;x<21;x++){
+    let v=((x*17+y*11+x*y*3)%7)<3;
+    for(const [fx,fy] of [[0,0],[14,0],[0,14]])if(x>=fx&&x<fx+7&&y>=fy&&y<fy+7){const dx=x-fx,dy=y-fy;v=dx===0||dx===6||dy===0||dy===6||(dx>=2&&dx<=4&&dy>=2&&dy<=4);}
+    if(v)ctx.fillRect(ox+x*step,oy+y*step,step,step);
   }
-  g2.position.set(x,y,z);
-  g2.scale.setScalar(scale||1);
-  return g2;
+  ctx.font='bold 18px sans-serif';ctx.fillText('MENÚ · DEMO',128,270);
+  ctx.font='14px sans-serif';ctx.fillText('Selecciona la mesa',128,297);
+  const t=new THREE.CanvasTexture(c);t.anisotropy=4;t.encoding=THREE.sRGBEncoding;return t;
 }
-function makeIceCream(x,y,z,scale){
-  const g2 = new THREE.Group();
-  const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.005,0.05,0.12,10), new THREE.MeshStandardMaterial({color:0xC98A4B, roughness:0.7}));
-  cone.position.y = 0.06; cone.castShadow = true; g2.add(cone);
-  const scoop1 = new THREE.Mesh(new THREE.SphereGeometry(0.055,12,12), new THREE.MeshStandardMaterial({color:0xF7D8E0, roughness:0.5}));
-  scoop1.position.y = 0.14; scoop1.castShadow = true; g2.add(scoop1);
-  const scoop2 = new THREE.Mesh(new THREE.SphereGeometry(0.045,12,12), new THREE.MeshStandardMaterial({color:0xFFF4D6, roughness:0.5}));
-  scoop2.position.y = 0.2; scoop2.castShadow = true; g2.add(scoop2);
-  g2.position.set(x,y,z);
-  g2.scale.setScalar(scale||1);
-  return g2;
+const menuTexture=makeMenuTexture();
+function makeDiningSet(index){
+  const g=new THREE.Group();g.name='Mesa '+(index+1);
+  g.add(cyl(.65,.74,.12,DESIGN.metal,0,.1,0));
+  g.add(cyl(.12,.17,1.05,DESIGN.metal,0,.66,0));
+  g.add(softBox(2.5,.16,1.8,DESIGN.ivory,0,1.25,0,.22));
+  for(const side of [-1,1]){
+    const chair=makeChair();chair.position.set(side*1.78,0,0);chair.rotation.y=-side*Math.PI/2;g.add(chair);
+    g.add(softBox(.83,.045,1.25,DESIGN.oak,side*.69,1.355,0,.09));
+    const plate=cyl(.3,.27,.06,DESIGN.ivory,side*.69,1.41,.14);g.add(plate);
+    ellipsoid(g,DESIGN.leaf,side*.69,1.46,.14,.19,.045,.19);
+    g.add(cyl(.1,.07,.27,index%2?DESIGN.purple:DESIGN.cream,side*.79,1.49,-.48));
+    g.add(box(.025,.025,.46,DESIGN.metal,side*.69+.33,1.4,.1));
+  }
+  g.add(softBox(.36,.05,.26,DESIGN.oak,0,1.365,-.3,.05));
+  const stand=box(.34,.47,.035,DESIGN.oak,0,1.59,-.3);g.add(stand);
+  // material propio por mesa: el destello de "nuevo pedido" ilumina solo el menú QR de esta mesa
+  const menuMat=new THREE.MeshStandardMaterial({map:menuTexture,emissiveMap:menuTexture,emissive:0xFFFFFF,emissiveIntensity:0,roughness:.7});
+  const face=new THREE.Mesh(new THREE.PlaneGeometry(.3,.4),menuMat);face.position.set(0,1.61,-.278);g.add(face);
+  g.userData.menu=face;
+  return g;
+}
+function makeRemy(){
+  const g=new THREE.Group();g.name='Remy · estudio de personaje v0';
+  stroke(g,[[0,.28,-.3],[.45,.2,-.75],[1,.13,-.5],[1.3,.12,.15],[1.15,.14,.6]],.064,DESIGN.pink);
+  ellipsoid(g,DESIGN.fur,0,1.15,0,.64,1.02,.48);
+  ellipsoid(g,DESIGN.belly,0,1.12,.32,.43,.78,.19);
+  for(const side of [-1,1]){
+    ellipsoid(g,DESIGN.fur,side*.39,.4,.02,.29,.4,.33);
+    ellipsoid(g,DESIGN.pink,side*.4,.13,.25,.25,.13,.38);
+    for(let i=0;i<3;i++)ellipsoid(g,DESIGN.pink,side*.4+(i-1)*.13,.1,.53,.065,.065,.15);
+  }
+  const head=new THREE.Group();head.position.y=2.22;g.add(head);
+  ellipsoid(head,DESIGN.fur,0,.36,.02,.59,.64,.48);
+  for(const side of [-1,1]){
+    const ear=ellipsoid(head,DESIGN.fur,side*.57,.86,-.07,.38,.57,.15);ear.rotation.z=-side*.25;
+    const inner=ellipsoid(head,DESIGN.pink,side*.58,.88,.045,.29,.44,.065);inner.rotation.z=-side*.25;
+    ellipsoid(head,DESIGN.ear,side*.57,.8,.087,.21,.3,.035);
+    ellipsoid(head,DESIGN.fur,side*.27,.15,.3,.34,.29,.39);
+    ellipsoid(head,DESIGN.ivory,side*.235,.65,.39,.21,.3,.105);
+    ellipsoid(head,DESIGN.iris,side*.23,.65,.486,.108,.15,.045);
+    ellipsoid(head,DESIGN.pupil,side*.23,.65,.52,.063,.105,.025);
+    ellipsoid(head,DESIGN.ivory,side*.23-.025,.7,.545,.028,.036,.012);
+    stroke(head,[[side*.1,.96,.37],[side*.25,1,.35],[side*.4,.94,.28]],.035,DESIGN.fur);
+    for(let i=0;i<3;i++)stroke(head,[[side*.38,.22-i*.07,.63],[side*.68,.3-i*.12,.68],[side*1.02,.36-i*.18,.58]],.009,DESIGN.cream);
+  }
+  ellipsoid(head,DESIGN.dark,0,-.06,.43,.27,.16,.19);
+  ellipsoid(head,DESIGN.pink,0,-.12,.58,.12,.04,.05);
+  for(const x of [-.065,.065])head.add(softBox(.11,.12,.065,DESIGN.ivory,x,.016,.604,.02));
+  ellipsoid(head,DESIGN.fur,0,.19,.53,.31,.24,.46);
+  ellipsoid(head,DESIGN.pink,0,.23,.92,.205,.17,.14);
+  // gorro de chef, pegado a la cabeza para que siga el giro idle
+  head.add(cyl(.32,.34,.25,DESIGN.ivory,0,1.02,-.045));
+  for(const [x,y,z,s] of [[0,1.4,0,.36],[-.28,1.35,0,.27],[.28,1.36,0,.27],[0,1.35,-.22,.3]])ellipsoid(head,DESIGN.ivory,x,y,z,s,s*1.12,s*.8);
+  // mano izquierda en alto con la cuchara; brazo derecho apoyado en la cadera
+  stroke(g,[[-.45,1.9,0],[-.7,1.68,.05],[-.95,2.15,.13]],.12,DESIGN.fur);
+  stroke(g,[[.46,1.88,0],[.74,1.38,.01],[.48,1.16,.31]],.13,DESIGN.fur);
+  ellipsoid(g,DESIGN.pink,.48,1.15,.35,.16,.18,.09);
+  g.add(cyl(.047,.065,2.96,DESIGN.oak,-.98,1.58,.2));
+  ellipsoid(g,DESIGN.oak,-.98,3.24,.2,.25,.44,.07);
+  ellipsoid(g,DESIGN.cream,-.98,3.27,.261,.18,.33,.012);
+  ellipsoid(g,DESIGN.pink,-.94,2.17,.22,.15,.15,.12);
+  for(let i=0;i<3;i++)ellipsoid(g,DESIGN.pink,-1,2.06+i*.095,.28,.12,.038,.065);
+  g.userData.head=head;
+  return g;
 }
 
 /* "mensajero": camina de ida y vuelta entre dos puntos del mundo, cargando algo.
@@ -615,39 +694,44 @@ function makeGlowFloor(z){
   return mesh;
 }
 
+const DINING_SET_SCALE = 0.6; // lleva la mesa de ~1.3 a ~0.8 de alto, a la altura de los personajes (~1.5)
+
 function buildDining(g, z){
-  g.add(makeFloor(z, 0xF3F6FC));
-  // barra
-  g.add(box(6,1.1,1.4, MAT.navy, z.center.x-4, 0.55, z.center.z-3.5));
-  // mesas + sillas
-  const tablePositions = [[3,2],[6,2],[3,-2.5],[6,-2.5],[9,0]];
-  tablePositions.forEach(([dx,dz],i)=>{
+  g.add(makeFloor(z, 0xE7D8C1));
+  // duela de roble: da escala sin descargar una textura pesada
+  for(let i=0;i<24;i++){
+    g.add(box(.017,.012,z.size.d, DESIGN.oak, z.center.x-z.size.w/2+(i+1)*z.size.w/25, .033, z.center.z, false));
+  }
+  // juegos de mesa (mesa + 2 sillas + menú QR), en dos filas con pasillo al centro para el mesero
+  const setPositions = [[-4.5,-2.2],[0,-2.2],[4.5,-2.2],[-4.5,2.3],[0,2.3],[4.5,2.3]];
+  setPositions.forEach(([dx,dz],i)=>{
     const tx = z.center.x+dx, tz = z.center.z+dz;
-    g.add(cyl(0.06,0.06,0.75, MAT.grey, tx,0.38,tz));
-    const top = cyl(0.85,0.85,0.08, MAT.white(), tx,0.78,tz);
-    g.add(top);
-    // pantalla QR mini sobre la mesa
-    const qr = box(0.28,0.28,0.03, MAT.screen, tx,0.95,tz);
-    g.add(qr);
-    const qrGlow = addGlowSprite(g, tx, 0.95, tz, 0.9, 0x2F6FED, 0.35);
-    idleAnimators.push((t)=>{ qr.material.emissiveIntensity = 0.4 + Math.sin(t*2+i)*0.25; qrGlow.material.opacity = 0.14 + Math.sin(t*2+i)*0.1; });
+    const set = makeDiningSet(i);
+    set.scale.setScalar(DINING_SET_SCALE);
+    set.position.set(tx, .04, tz);
+    g.add(set);
+    // el menú QR de la mesa es el que "recibe" el pedido en la coreografía viva
+    const qr = set.userData.menu;
+    const qrGlow = addGlowSprite(g, tx, .04+1.61*DINING_SET_SCALE, tz-.2*DINING_SET_SCALE, 0.9, 0x2F6FED, 0.35);
+    idleAnimators.push((t)=>{ qrGlow.material.opacity = 0.14 + Math.sin(t*2+i)*0.1; });
     diningTables.push({x:tx, z:tz, qr, qrGlow});
-    // platillo sobre la mesa, para que se sienta un restaurante de verdad
-    const dishTop = 0.82; // superficie de la mesa
-    const foodMakers = [makeBurger, makeFries, makeIceCream, makeBurger, makeFries];
-    const food = foodMakers[i % foodMakers.length](tx-0.32, dishTop, tz+0.18, 1.3);
-    g.add(food);
-    // sillas
-    [[0.9,0],[ -0.9,0],[0,0.9],[0,-0.9]].forEach(([sx,sz])=>{
-      g.add(box(0.4,0.55,0.4, MAT.wood, tx+sx, 0.28, tz+sz, false));
-    });
   });
-  // clientes sentados, con leve balanceo y gesto de brazo (comiendo/platicando)
-  [[4.5,0.5],[6.5,-2],[9,0.8]].forEach(([dx,dz],i)=>{
+  // mampara baja al fondo: mantiene el diorama legible desde cualquier cámara
+  g.add(softBox(14.8,1.1,.24, DESIGN.cream, z.center.x, .55, z.center.z-5.4, .07));
+  for(const dx of [-6.5,6.5]){
+    const plant = new THREE.Group();
+    plant.add(cyl(.32,.25,.55, DESIGN.ivory, 0,.31,0));
+    for(let i=0;i<5;i++){ const a=i*1.26; const leaf=ellipsoid(plant, DESIGN.leaf, Math.sin(a)*.18,.9,Math.cos(a)*.18, .13,.46,.1); leaf.rotation.z=Math.sin(a)*.4; }
+    plant.scale.setScalar(0.8);
+    plant.position.set(z.center.x+dx, 0, z.center.z-4.55);
+    g.add(plant);
+  }
+  // clientes de pie en el lado libre de su mesa, mirando hacia ella, con leve balanceo y gesto de brazo
+  [[-4.3,-3.15,0],[4.3,-3.15,0],[0.3,1.35,0]].forEach(([dx,dz,rot],i)=>{
     const holder = new THREE.Group();
     const baseY = 0.02;
     holder.position.set(z.center.x+dx, baseY, z.center.z+dz);
-    holder.rotation.y = Math.random()*Math.PI*2;
+    holder.rotation.y = rot;
     g.add(holder);
     const guest = makePerson(i%2===0 ? 0x0B1F3A : 0x2F6FED, 0xE8C4A2, 0.82);
     holder.add(guest);
@@ -659,16 +743,16 @@ function buildDining(g, z){
   });
   // mesero caminando entre mesas, cargando una charola
   const waiterHolder = new THREE.Group();
-  waiterHolder.position.set(z.center.x+2, 0, z.center.z-1.5);
+  waiterHolder.position.set(z.center.x-5.5, 0, z.center.z);
   g.add(waiterHolder);
   const waiter = makePerson(0x0B1F3A, 0xE8C4A2, 0.95);
   const tray = box(0.5,0.04,0.32, MAT.white(), 0,0.62,0.24, false);
   waiterHolder.add(tray);
   waiterHolder.add(waiter);
   idleAnimators.push((t)=>{
-    const cycle = (t*0.35) % 4;
-    const p = cycle < 2 ? cycle : 4-cycle; // ida y vuelta suave
-    waiterHolder.position.x = z.center.x + 2 + p*2.2;
+    const cycle = (t*0.16) % 4;
+    const p = cycle < 2 ? cycle : 4-cycle; // ida y vuelta suave por el pasillo central
+    waiterHolder.position.x = z.center.x - 5.5 + p*5;
     waiterHolder.rotation.y = cycle < 2 ? Math.PI*0.5 : -Math.PI*0.5;
     if(waiter.userData.armL) waiter.userData.armL.rotation.x = Math.sin(t*4)*0.15;
     waiterHolder.position.y = Math.abs(Math.sin(t*4))*0.03;
@@ -737,6 +821,12 @@ function buildKitchen(g, z){
   const lampBulb = box(4,0.08,0.12, new THREE.MeshStandardMaterial({color:0xFF6B4A, emissive:0xFF6B4A, emissiveIntensity:0.8}), z.center.x, 2.05, z.center.z+4.3, false);
   g.add(lampBulb);
   idleAnimators.push((t)=>{ lampGlow.material.opacity = 0.22 + Math.sin(t*1.1)*0.08; });
+  // Remy supervisando la ventana de expedición, parado sobre el mostrador (a un lado de la lámpara)
+  const remy = makeRemy();
+  remy.scale.setScalar(0.32);
+  remy.position.set(z.center.x+2.5, 1.055, z.center.z+4.3);
+  g.add(remy);
+  idleAnimators.push((t)=>{ remy.userData.head.rotation.y = Math.sin(t*0.7)*0.11; });
   // exhaustor giratorio (idle)
   const fan = cyl(0.4,0.4,0.08, MAT.navy, z.center.x, 3.4, z.center.z+3.4, false);
   g.add(fan);
@@ -918,7 +1008,7 @@ ZONE_ORDER.forEach(id=>{
    visualmente que "todo está conectado" en el restaurante */
 makeCourier(
   {x: ZONES.kitchen.center.x, z: ZONES.kitchen.center.z+5.3},   // sale por la ventana de expedición, ya despejado de la barra
-  {x: ZONES.dining.center.x+6, z: ZONES.dining.center.z-6},     // entra al comedor
+  {x: ZONES.dining.center.x+6.2, z: ZONES.dining.center.z},     // entra al comedor por el pasillo, rodeando la mampara
   1.3, 'humanMaleA', 0xF4C430 // charola de comida
 );
 makeCourier(
