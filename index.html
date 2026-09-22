@@ -857,6 +857,59 @@ function makeToque(s){
 
 const OUTFITS = { courier: makeCap, chef: makeToque };
 
+/* gira un hueso sobre su eje de balanceo, respetando la pose de reposo del rig */
+function swingBone(bone, angle, q){
+  q.setFromAxisAngle(bone.userData.axis, angle);
+  bone.quaternion.copy(q).multiply(bone.userData.rest);
+}
+
+/* Remy real: la animación que trae de Blender mueve cabeza, orejas, brazos y cola, pero no
+   las piernas. El recorrido por el mostrador y el caminado se arman aquí, girando los huesos
+   de muslo y espinilla alrededor del eje transversal del modelo. */
+function startRemyPatrol(holder, model, patrol){
+  const legs = [
+    {thigh: model.getObjectByName('thighL'), shin: model.getObjectByName('shinL'), phase: 0},
+    {thigh: model.getObjectByName('thighR'), shin: model.getObjectByName('shinR'), phase: Math.PI}
+  ].filter(l => l.thigh && l.shin);
+  if(!legs.length) return;
+
+  const modelQuat = new THREE.Quaternion();
+  model.getWorldQuaternion(modelQuat);
+  legs.forEach(l => [l.thigh, l.shin].forEach(b => {
+    const parentQuat = new THREE.Quaternion();
+    b.parent.getWorldQuaternion(parentQuat);
+    b.userData.rest = b.quaternion.clone();
+    // eje X del modelo (el transversal) llevado al espacio del padre del hueso
+    b.userData.axis = new THREE.Vector3(1,0,0)
+      .applyQuaternion(modelQuat)
+      .applyQuaternion(parentQuat.invert())
+      .normalize();
+  }));
+
+  const span = patrol.x1 - patrol.x0;
+  const speed = 0.42;   // unidades por segundo
+  const stride = 11;    // ritmo del paso, ajustado para que no patine
+  const q = new THREE.Quaternion();
+  let yaw = Math.PI/2;
+  idleAnimators.push((t)=>{
+    const cycle = (t*speed) % (span*2);
+    const forward = cycle < span;
+    holder.position.x = patrol.x0 + (forward ? cycle : span*2 - cycle);
+    // giro suave al llegar a cada extremo, en vez de voltearse de golpe
+    let delta = (forward ? Math.PI/2 : -Math.PI/2) - yaw;
+    while(delta >  Math.PI) delta -= Math.PI*2;
+    while(delta < -Math.PI) delta += Math.PI*2;
+    yaw += delta * 0.08;
+    holder.rotation.y = yaw;
+    const phase = t*speed*stride;
+    holder.position.y = patrol.baseY + Math.abs(Math.sin(phase))*0.012;
+    legs.forEach(l=>{
+      swingBone(l.thigh, Math.sin(phase + l.phase)*0.42, q);
+      swingBone(l.shin, -Math.max(0, Math.sin(phase + l.phase + 1.2))*0.42, q);
+    });
+  });
+}
+
 /* la prenda cuelga del holder y persigue la posición del hueso de la cabeza: así sigue el
    movimiento de la animación sin depender de cómo esté orientado el rig. El hueso está a
    la altura del cuello, así que se sube una fracción de la estatura del personaje. */
@@ -1116,22 +1169,30 @@ function buildKitchen(g, z){
   // ventana de expedición hacia el comedor, con lámpara de calor
   const passCounter = box(6,1.05,0.8, MAT.white(), z.center.x, 0.53, z.center.z+4.3, false);
   g.add(passCounter);
-  const lampGlow = addGlowSprite(g, z.center.x, 2.1, z.center.z+4.3, 1.4, 0xFF6B4A, 0.35);
-  const lampBulb = box(4,0.08,0.12, new THREE.MeshStandardMaterial({color:0xFF6B4A, emissive:0xFF6B4A, emissiveIntensity:0.8}), z.center.x, 2.05, z.center.z+4.3, false);
+  // la lámpara va alta: por debajo pasa Remy con su cuchara mientras recorre el mostrador
+  const lampGlow = addGlowSprite(g, z.center.x, 2.4, z.center.z+4.3, 1.4, 0xFF6B4A, 0.35);
+  const lampBulb = box(4,0.08,0.12, new THREE.MeshStandardMaterial({color:0xFF6B4A, emissive:0xFF6B4A, emissiveIntensity:0.8}), z.center.x, 2.35, z.center.z+4.3, false);
   g.add(lampBulb);
   idleAnimators.push((t)=>{ lampGlow.material.opacity = 0.22 + Math.sin(t*1.1)*0.08; });
-  // Remy supervisando la ventana de expedición, parado sobre el mostrador (a un lado de la lámpara).
-  // La figura simple se reemplaza por el modelo animado de Blender en cuanto carga.
+  // Remy supervisa la ventana de expedición caminando de un extremo al otro del mostrador.
+  // La figura simple se reemplaza por el modelo animado de Blender en cuanto carga; si la
+  // carga falla se queda parada en su sitio (el recorrido solo arranca con el modelo real).
+  const remyPatrol = {
+    x0: z.center.x - 2.4,
+    x1: z.center.x + 2.4,
+    z: z.center.z + 4.3,
+    baseY: 1.055 // altura del mostrador de expedición
+  };
   const remyHolder = new THREE.Group();
-  remyHolder.position.set(z.center.x+2.5, 1.055, z.center.z+4.3);
+  remyHolder.position.set(z.center.x + 2.4, remyPatrol.baseY, remyPatrol.z);
   g.add(remyHolder);
   const remy = makeRemy();
-  remy.scale.setScalar(0.32);
+  remy.scale.setScalar(0.25);
   remyHolder.add(remy);
   idleAnimators.push((t)=>{
     if(remy.parent) remy.userData.head.rotation.y = Math.sin(t*0.7)*0.11;
   });
-  pendingRemy = {holder: remyHolder, placeholder: remy, targetHeight: 1.30};
+  pendingRemy = {holder: remyHolder, placeholder: remy, targetHeight: 1.02, patrol: remyPatrol};
   // exhaustor giratorio (idle)
   const fan = cyl(0.4,0.4,0.08, MAT.navy, z.center.x, 3.4, z.center.z+3.4, false);
   g.add(fan);
@@ -1672,6 +1733,8 @@ async function loadRealAssets(){
       fitHeight(model, pendingRemy.targetHeight);
       pendingRemy.holder.remove(pendingRemy.placeholder);
       pendingRemy.holder.add(model);
+      attachHeadwear(pendingRemy.holder, model, makeToque); // su gorro de chef
+      startRemyPatrol(pendingRemy.holder, model, pendingRemy.patrol);
       if(gltf.animations && gltf.animations.length){
         const mixer = new THREE.AnimationMixer(model);
         const action = mixer.clipAction(gltf.animations[0]);
