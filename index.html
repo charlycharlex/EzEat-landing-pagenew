@@ -161,8 +161,11 @@
   }
 
   /* --- tour cinemático "ver cómo se conecta todo" --- */
+  /* durante el recorrido apenas se oscurece, y solo hacia las orillas: el centro queda
+     limpio para que se vean las estaciones. El cierre trae su propio fondo, más oscuro. */
   #showcaseDim{
-    position:fixed; inset:0; z-index:15; background:rgba(11,31,58,0.4);
+    position:fixed; inset:0; z-index:15;
+    background:radial-gradient(ellipse at 50% 42%, rgba(11,31,58,0.04) 32%, rgba(11,31,58,0.30) 100%);
     opacity:0; pointer-events:none; transition:opacity .6s ease;
   }
   #showcaseDim.show{opacity:1;}
@@ -180,6 +183,7 @@
   #showcaseFinale{
     position:fixed; inset:0; z-index:17; display:flex; flex-direction:column; align-items:center; justify-content:center;
     text-align:center; opacity:0; pointer-events:none; transition:opacity .7s ease; padding:0 24px;
+    background:rgba(11,31,58,0.46); /* el texto es blanco: aquí sí hace falta contraste */
   }
   #showcaseFinale.show{opacity:1;}
   #showcaseFinale h2{
