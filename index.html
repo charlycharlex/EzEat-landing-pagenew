@@ -124,9 +124,16 @@
   }
   #panel ul li.show{opacity:1; transform:translateY(0);}
   #panel ul li .check{width:15px; height:15px; border-radius:50%; background:var(--blue-soft); color:var(--blue); flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:9px; margin-top:1px;}
+  #panel .actions{margin-top:20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;}
+  #panel .demo{
+    display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:600;
+    color:var(--white); background:var(--navy); padding:10px 17px; border-radius:100px;
+    text-decoration:none; transition:background .25s ease, transform .25s ease;
+  }
+  #panel .demo:hover{background:var(--blue); transform:translateY(-1px);}
   #panel .cta{
-    margin-top:20px; display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:600;
-    color:var(--navy); background:none; border:none; cursor:pointer; padding:0;
+    display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:600;
+    color:var(--slate); background:none; border:none; cursor:pointer; padding:0;
   }
   #panel .cta:hover{color:var(--blue);}
   #panel .close{position:absolute; top:18px; right:18px; width:22px; height:22px; border-radius:50%; border:none; background:var(--surface); color:var(--slate); cursor:pointer; font-size:13px;}
@@ -153,7 +160,7 @@
 
   @media (max-width:720px){
     header.top{padding:18px 20px;}
-    .top .cta{display:none;}
+    .top .cta{padding:9px 14px; font-size:12px;} /* se achica, pero nunca se esconde: es el único contacto */
     #panel{left:16px; right:16px; width:auto; top:auto; bottom:96px; transform:translateY(16px);}
     #panel.visible{transform:translateY(0);}
     #flowBtn span.label{display:none;}
@@ -237,7 +244,10 @@
   <h2 id="pTitle"></h2>
   <p class="tag" id="pTag"></p>
   <ul id="pList"></ul>
-  <button class="cta" id="pCta"></button>
+  <div class="actions">
+    <a class="demo" id="pDemo" target="_blank" rel="noopener">Agendar demo</a>
+    <button class="cta" id="pCta"></button>
+  </div>
 </div>
 
 <div id="labelLayer"></div>
@@ -377,7 +387,10 @@ try{
   loaderError('No fue posible iniciar el visor 3D. Prueba en un navegador con WebGL habilitado.');
   return;
 }
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+/* en celular se baja la resolución de render y el tamaño del mapa de sombras: es donde
+   más se nota el costo y donde menos se aprecia el detalle */
+const smallScreen = innerWidth <= 720;
+renderer.setPixelRatio(Math.min(devicePixelRatio, smallScreen ? 1.5 : 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -390,7 +403,7 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 0.9);
 sun.position.set(20, 30, 12);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048,2048);
+sun.shadow.mapSize.set(smallScreen ? 1024 : 2048, smallScreen ? 1024 : 2048);
 sun.shadow.camera.left = -40; sun.shadow.camera.right = 40;
 sun.shadow.camera.top = 30; sun.shadow.camera.bottom = -30;
 sun.shadow.camera.far = 90;
@@ -1970,17 +1983,43 @@ function goOverview(){
   });
 }
 
-/* drag / zoom, con inercia al soltar */
+/* drag / zoom, con inercia al soltar. Con dos dedos se pellizca para acercar:
+   el canvas usa touch-action:none, así que el gesto hay que resolverlo aquí. */
+const touchPoints = new Map();
+let pinchPrev = 0;
+function pinchDistance(){
+  const [a, b] = Array.from(touchPoints.values());
+  return Math.hypot(a.x-b.x, a.y-b.y);
+}
 canvas.addEventListener('pointerdown', (e)=>{
+  touchPoints.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(touchPoints.size === 2){
+    dragging = false; movedSinceDown = true; // con dos dedos se acerca, no se gira
+    pinchPrev = pinchDistance();
+    canvas.classList.remove('grabbing');
+    return;
+  }
   dragging=true; lastX=e.clientX; lastY=e.clientY; lastMoveT=performance.now();
   downX=e.clientX; downY=e.clientY; movedSinceDown=false;
   velTheta=0; velPhi=0;
   canvas.classList.add('grabbing');
 });
-window.addEventListener('pointerup', ()=>{
+function endPointer(e){
+  touchPoints.delete(e.pointerId);
+  if(touchPoints.size < 2) pinchPrev = 0;
+  // al soltar un dedo del pellizco, el que queda no debe arrastrar de golpe
   dragging=false; canvas.classList.remove('grabbing');
-});
+}
+window.addEventListener('pointerup', endPointer);
+window.addEventListener('pointercancel', endPointer);
 window.addEventListener('pointermove', (e)=>{
+  if(touchPoints.has(e.pointerId)) touchPoints.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(touchPoints.size === 2 && !isTransitioning && !showcaseRunning){
+    const dist = pinchDistance();
+    if(pinchPrev) zoomTarget = THREE.MathUtils.clamp(zoomTarget + (pinchPrev - dist)*0.05, -6, 10);
+    pinchPrev = dist;
+    return;
+  }
   if(dragging && !isTransitioning && !showcaseRunning){
     if(Math.hypot(e.clientX-downX, e.clientY-downY) > 6) movedSinceDown = true;
     const now = performance.now();
@@ -2034,7 +2073,12 @@ function onHoverMove(e){
 }
 function setZoneHighlight(id, on){
   const target = zoneGroups[id];
-  gsap.to(target.scale, {x:on?1.02:1, y:on?1.02:1, z:on?1.02:1, duration:0.4, ease:'power2.out'});
+  // la zona está modelada en coordenadas del mundo, así que escalarla la correría hacia el
+  // origen: se compensa moviendo el grupo para que crezca alrededor de su propio centro
+  const s = on ? 1.02 : 1;
+  const c = ZONES[id].center;
+  gsap.to(target.scale, {x:s, y:s, z:s, duration:0.4, ease:'power2.out'});
+  gsap.to(target.position, {x:c.x*(1-s), y:0, z:c.z*(1-s), duration:0.4, ease:'power2.out'});
   target.children.forEach(ch=>{
     if(ch.isLine){ ch.material.color.set(on?0x2F6FED:0xC7D0DC); ch.material.opacity = on?1:0.8; }
   });
@@ -2069,6 +2113,10 @@ const pTitle = document.getElementById('pTitle');
 const pTag = document.getElementById('pTag');
 const pList = document.getElementById('pList');
 const pCta = document.getElementById('pCta');
+const pDemo = document.getElementById('pDemo');
+/* el enlace de contacto lleva la zona que estaba viendo el visitante: así ventas sabe
+   por qué módulo llegó cada solicitud */
+const CONTACT_URL = 'https://ezeat.com.mx/contact';
 
 /* el botón del panel avanza por el recorrido del dato y luego cierra el círculo por ZONE_ORDER */
 function nextZoneId(id){
@@ -2090,6 +2138,8 @@ function showPanel(id){
     pList.appendChild(li);
   });
   pCta.textContent = 'Siguiente: ' + ZONES[nextZoneId(id)].title + ' →';
+  pDemo.href = CONTACT_URL + '?interes=' + encodeURIComponent(z.title.toLowerCase());
+  pDemo.textContent = 'Agendar demo de ' + z.title.toLowerCase();
   panel.classList.add('visible');
   requestAnimationFrame(()=>{
     Array.from(pList.children).forEach((li,i)=>{
