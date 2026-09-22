@@ -23,7 +23,9 @@
     --glass:rgba(255,255,255,0.72);
   }
   *{box-sizing:border-box; margin:0; padding:0;}
-  html,body{height:100%; overflow:hidden; background:var(--white); font-family:'Inter',sans-serif; color:var(--ink);}
+  /* al arrastrar para girar la cámara no debe quedar texto seleccionado por toda la interfaz */
+  html,body{height:100%; overflow:hidden; background:var(--white); font-family:'Inter',sans-serif; color:var(--ink);
+            -webkit-user-select:none; user-select:none;}
   #app{position:fixed; inset:0; z-index:0;}
   canvas{display:block; width:100%; height:100%; touch-action:none; cursor:grab;}
   canvas.grabbing{cursor:grabbing;}
@@ -1061,7 +1063,14 @@ function makeOutline(z){
 }
 function makeHit(z){
   const geo = new THREE.BoxGeometry(z.size.w, 5, z.size.d);
-  const mat = new THREE.MeshBasicMaterial({color:0x2F6FED, transparent:true, opacity:0});
+  // caja invisible, solo para detectar clics sobre la zona. Es transparente, así que se
+  // dibuja en la pasada de transparencias: si escribiera en el buffer de profundidad
+  // taparía rótulos y logos según el ángulo de cámara (de ahí que el logo de la camioneta
+  // desapareciera al girar la vista).
+  const mat = new THREE.MeshBasicMaterial({
+    color:0x2F6FED, transparent:true, opacity:0,
+    depthWrite:false, colorWrite:false
+  });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(z.center.x, 2.5, z.center.z);
   return mesh;
